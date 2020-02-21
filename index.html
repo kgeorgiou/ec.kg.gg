@@ -1,0 +1,214 @@
+<html>
+
+<body>
+  <div>
+    <h3>EC CryptoKeys and IndexedDB</h3>
+    <hr/>
+
+    <p>1. Generate ECDSA CryptoKeyPair</p>
+    <p>2. Store the Public and Private CryptoKey in IndexedDB</p>
+    <button onclick="stepsECDSA()">Run Steps</button>
+
+    <p>1. Generate ECDH CryptoKeyPair</p>
+    <p>2. Store the Public and Private CryptoKey in IndexedDB</p>
+    <button onclick="stepsECDH()">Run Steps</button>
+
+    <p>Attempting to store the Private EC CryptoKey in IndexedDB throws DataCloneError in Firefox 54.01.</p>
+    <p>Possibly an issue with the <a href="//www.w3.org/TR/WebCryptoAPI/#cryptokey-interface-clone" target="_blank">structured clone algorithm</a> implementation.</p>
+    <hr/>
+  </div>
+  <div id="console"></div>
+</body>
+
+<footer>
+  <!-- Begin CryptoKey Generation & Storage -->
+  <script>
+    if (window.crypto && !window.crypto.subtle && window.crypto.webkitSubtle) {
+      window.crypto.subtle = window.crypto.webkitSubtle;
+    }
+
+    var _SUCCESS = "s";
+    var _INFO = "i";
+    var _ERROR = "e";
+    var consoleNode = document.getElementById("console");
+
+    function logOnScreen(msg, type) {
+      var p = document.createElement("p");
+      p.className = type === _ERROR ? "error" : type === _SUCCESS ? "success" : "info";
+      p.innerText = ">> " + msg;
+      consoleNode.appendChild(p);
+    }
+
+    function isCryptoKey(o) {
+      return o.constructor.name == "CryptoKey" || o.hasOwnProperty("algorithm");
+    }
+
+    function stepsECDSA() {
+      window.crypto.subtle.generateKey({
+          name: "ECDSA",
+          namedCurve: "P-256",
+        },
+        true, ["sign", "verify"]
+      ).then(function(keyPair) {
+        storeKeyPair(keyPair, "ECDSA")
+      });
+    }
+
+    function stepsECDH() {
+      window.crypto.subtle.generateKey({
+          name: "ECDH",
+          namedCurve: "P-256",
+        },
+        true, ["deriveKey", "deriveBits"]
+      ).then(function(keyPair) {
+        storeKeyPair(keyPair, "ECDH")
+      });
+    }
+
+    function storeKeyPair(keyPair, keyType) {
+      var _dbName = "MyDatabase";
+      var _objectStoreName = "MyObjectStore";
+
+      var indexedDB = window.indexedDB || window.mozIndexedDB || window.webkitIndexedDB || window.msIndexedDB || window.shimIndexedDB;
+
+      // Open (or create) the database
+      var open = indexedDB.open(_dbName, 1);
+      logOnScreen("IndexedDB instance \"" + _dbName + "\" opened", _INFO)
+
+      // Create the schema
+      open.onupgradeneeded = function() {
+        var db = open.result;
+        var store = db.createObjectStore(_objectStoreName, {
+          keyPath: "id"
+        });
+        logOnScreen("IndexedDB Object Store \"" + _objectStoreName + "\" opened", _INFO)
+      };
+
+      open.onsuccess = function() {
+        // Start a new transaction
+        var db = open.result;
+        var tx = db.transaction(_objectStoreName, "readwrite");
+        var store = tx.objectStore(_objectStoreName);
+
+        // Store Private CryptoKey object
+        try {
+          store.put({
+            id: "prv-" + keyType,
+            type: keyType,
+            cryptoKey: keyPair.privateKey
+          });
+          logOnScreen("Private " + keyType + " CryptoKey stored successfully", _SUCCESS);
+        } catch (e) {
+          logOnScreen("Failed to store Private " + keyType + " CryptoKey: " + e, _ERROR);
+        }
+
+        // Store Public CryptoKey object
+        try {
+          store.put({
+            id: "pub-" + keyType,
+            cryptoKey: keyPair.publicKey
+          });
+          logOnScreen("Public " + keyType + " CryptoKey stored successfully", _SUCCESS);
+        } catch (e) {
+          logOnScreen("Failed to store Public " + keyType + " CryptoKey: " + e, _ERROR);
+        }
+
+        // Attempt to query the 2 CryptoKeys
+        var getPub = store.get("pub-" + keyType);
+        var getPrv = store.get("prv-" + keyType);
+
+        try {
+          getPub.onsuccess = function() {
+            if (getPub.result !== undefined && isCryptoKey(getPub.result.cryptoKey)) {
+              logOnScreen("Public " + keyType + " CryptoKey retrieved from IndexedDB successfully", _SUCCESS);
+            } else {
+              logOnScreen("Public " + keyType + " CryptoKey does not exist in IndexedDB", _INFO)
+            }
+          };
+        } catch (e) {
+          logOnScreen(e, _ERROR);
+        }
+
+        try {
+          getPrv.onsuccess = function() {
+            if (getPrv.result !== undefined && isCryptoKey(getPrv.result.cryptoKey)) {
+              logOnScreen("Private " + keyType + " CryptoKey retrieved from IndexedDB successfully", _SUCCESS);
+            } else {
+              logOnScreen("Private " + keyType + " CryptoKey does not exist in IndexedDB", _INFO);
+            }
+          };
+        } catch (e) {
+          logOnScreen(e, _ERROR);
+        }
+
+        // Close the db when the transaction is done
+        tx.oncomplete = function() {
+          db.close();
+          logOnScreen("Transaction completed", _INFO);
+          logOnScreen("IndexedDB instance closed", _INFO);
+        };
+      }
+    }
+  </script>
+  <!-- End CryptoKey Generation & Storage -->
+
+  <!-- Begin Styles -->
+  <link href="//fonts.googleapis.com/css?family=Fira+Sans" rel="stylesheet">
+  <link href="//fonts.googleapis.com/css?family=Ubuntu+Mono" rel="stylesheet">
+  <style>
+    html,
+    body {
+      font-family: "Fira Sans", sans-serif;
+      background-color: #3d3d3d;
+      color: white;
+    }
+
+    button {
+      padding: 8px 42px;
+      background-color: transparent;
+      border: 1px white solid;
+      color: white;
+      font-weight: normal;
+      font-size: 0.8em;
+      cursor: pointer;
+      outline-style: none;
+    }
+
+    button:hover {
+      background-color: #555;
+    }
+
+    hr {
+      margin: 24px 0;
+    }
+
+    #console {
+      font-family: "Ubuntu Mono", monospace;
+    }
+
+    #console .success {
+      color: #49d292
+    }
+
+    #console .info {
+      color: white;
+    }
+
+    #console .error {
+      color: #f06
+    }
+
+    a {
+      color: #0a98e2;
+      border-bottom: 1px solid #bce6fc;
+      text-decoration: none;
+    }
+
+    a:hover {
+      border-bottom: 1px solid #0a98e2;
+    }
+  </style>
+  <!-- End Styles -->
+</footer>
+
+</html>
